@@ -31,8 +31,25 @@ Client requires the -addr argument
 `
 
 type server struct{}
+type authIDKey struct{}
+
+func withAuthID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		auth := req.Header.Get("X-User-Auth")
+		ctx := context.WithValue(req.Context(), authIDKey{}, auth)
+		next.ServeHTTP(w, req.WithContext(ctx))
+	})
+}
+
+func authIDFromCtx(ctx context.Context) (string, bool) {
+	id, ok := ctx.Value(authIDKey{}).(string)
+	return id, ok
+}
 
 func (s *server) Greet(ctx context.Context, req *pb.GreetRequest) (*pb.GreetResponse, error) {
+	if authID, ok := authIDFromCtx(ctx); ok {
+		log.Printf("[server] Greet received with authID: %s\n", authID)
+	}
 	if req.Name == "" {
 		return nil, twirp.RequiredArgumentError("name")
 	}
@@ -73,7 +90,7 @@ func runServer() {
 
 	addr := ":" + *port
 	log.Printf("[server] listening on addr: %v\n", addr)
-	log.Fatal(http.ListenAndServe(addr, twirpHandler))
+	log.Fatal(http.ListenAndServe(addr, withAuthID(twirpHandler)))
 }
 
 func doClientReq() {
@@ -83,8 +100,18 @@ func doClientReq() {
 	}
 
 	// do the client stuff
+	header := make(http.Header)
+	header.Set("X-User-Auth", "1010101101001201")
+
 	client := pb.NewGreeterProtobufClient(*serverAddr, &http.Client{})
-	resp, err := client.Greet(context.Background(), &pb.GreetRequest{Name: *name})
+	ctx := context.Background()
+	ctx, err := twirp.WithHTTPRequestHeaders(ctx, header)
+	if err != nil {
+		log.Printf("[client] failed setting headers: %v\n", err)
+		return
+	}
+
+	resp, err := client.Greet(ctx, &pb.GreetRequest{Name: *name})
 	if err != nil {
 		if twerr, ok := err.(twirp.Error); ok {
 			switch twerr.Code() {
