@@ -1,0 +1,10 @@
+{
+  "name": "twirp-greeter",
+  "profile": "default",
+  "regions": [
+    "us-west-1"
+  ],
+  "proxy": {
+    "command": "./server server"
+  }
+}
